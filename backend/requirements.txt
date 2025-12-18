@@ -4,19 +4,20 @@ uvicorn[standard]==0.27.0
 python-multipart==0.0.6
 
 # LangGraph & LLM
-langgraph==0.0.55
-langchain==0.1.6
-langchain-google-genai==0.0.11
-google-generativeai==0.3.2
+langgraph==0.1.4
+langchain==0.2.6
+langchain-core==0.2.10
+langchain-community==0.2.6
+langchain-google-genai==1.0.6
+google-generativeai>=0.5.4
 
 # Indian Market Data
 yfinance==0.2.35
 nsepython==2.7
 
 # Data Processing
-pandas==2.2.0
-numpy==1.26.3
-pydantic==2.5.3
+pandas>=2.0.0
+numpy>=1.24.0
 
 # Technical Analysis
 pandas-ta
