@@ -1,0 +1,29 @@
+# FastAPI Backend
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+
+# LangGraph & LLM
+langgraph==0.0.55
+langchain==0.1.6
+langchain-google-genai==0.0.11
+google-generativeai==0.3.2
+
+# Indian Market Data
+yfinance==0.2.35
+nsepython==2.7
+
+# Data Processing
+pandas==2.2.0
+numpy==1.26.3
+pydantic==2.5.3
+
+# Technical Analysis
+pandas-ta
+
+# HTTP & Async
+httpx==0.26.0
+aiohttp==3.9.1
+
+# Utilities
+python-dotenv==1.0.0
