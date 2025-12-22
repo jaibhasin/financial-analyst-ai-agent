@@ -51,6 +51,13 @@ class AnalysisResponse(BaseModel):
     generated_at: str
 
 
+class ComparisonResponse(BaseModel):
+    """Response for comparing multiple stocks."""
+    tickers: list[str]
+    comparison_data: dict
+    generated_at: str
+
+
 # Health check
 @app.get("/")
 async def root():
@@ -176,6 +183,107 @@ async def analyze_stock(ticker: str) -> AnalysisResponse:
         raise HTTPException(
             status_code=500,
             detail=f"Analysis failed for {ticker}. Please try again later."
+        )
+
+
+@app.get("/compare")
+async def compare_stocks(tickers: str) -> ComparisonResponse:
+    """
+    Compare multiple stocks side-by-side.
+    
+    Args:
+        tickers: Comma-separated list of ticker symbols (e.g., 'RELIANCE,TCS,INFY')
+        
+    Returns:
+        Comparison data for all requested stocks
+    """
+    from agents.market_data_agent import MarketDataAgent
+    from datetime import datetime
+    from utils import validate_ticker, get_logger
+    import asyncio
+    
+    logger = get_logger(__name__)
+    
+    # Parse and validate tickers
+    ticker_list = [t.strip().upper() for t in tickers.split(',')]
+    
+    if len(ticker_list) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Please provide at least 2 tickers to compare"
+        )
+    
+    if len(ticker_list) > 5:
+        raise HTTPException(
+            status_code=400,
+            detail="Maximum 5 stocks can be compared at once"
+        )
+    
+    # Validate all tickers
+    for ticker in ticker_list:
+        if not validate_ticker(ticker):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid ticker format: {ticker}"
+            )
+    
+    try:
+        logger.info(f"Comparing stocks: {', '.join(ticker_list)}")
+        
+        agent = MarketDataAgent()
+        
+        # Fetch quotes for all tickers in parallel
+        tasks = [agent.get_quick_quote(ticker) for ticker in ticker_list]
+        quotes = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Process results
+        comparison_data = {
+            "stocks": [],
+            "metrics": {
+                "highest_price": None,
+                "lowest_price": None,
+                "best_performer": None,
+                "worst_performer": None
+            }
+        }
+        
+        valid_quotes = []
+        for i, quote in enumerate(quotes):
+            if isinstance(quote, Exception):
+                logger.warning(f"Failed to fetch {ticker_list[i]}: {str(quote)}")
+                continue
+            valid_quotes.append(quote)
+            comparison_data["stocks"].append(quote)
+        
+        if not valid_quotes:
+            raise HTTPException(
+                status_code=404,
+                detail="Could not fetch data for any of the provided tickers"
+            )
+        
+        # Calculate comparison metrics
+        prices = [q["price"] for q in valid_quotes]
+        changes = [q["change_percent"] for q in valid_quotes]
+        
+        comparison_data["metrics"]["highest_price"] = max(valid_quotes, key=lambda x: x["price"])["ticker"]
+        comparison_data["metrics"]["lowest_price"] = min(valid_quotes, key=lambda x: x["price"])["ticker"]
+        comparison_data["metrics"]["best_performer"] = max(valid_quotes, key=lambda x: x["change_percent"])["ticker"]
+        comparison_data["metrics"]["worst_performer"] = min(valid_quotes, key=lambda x: x["change_percent"])["ticker"]
+        
+        logger.info(f"Successfully compared {len(valid_quotes)} stocks")
+        
+        return ComparisonResponse(
+            tickers=ticker_list,
+            comparison_data=comparison_data,
+            generated_at=datetime.now().isoformat()
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error comparing stocks: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to compare stocks. Please try again later."
         )
 
 
