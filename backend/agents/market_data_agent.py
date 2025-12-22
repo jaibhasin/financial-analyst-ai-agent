@@ -10,6 +10,9 @@ from datetime import datetime, timedelta
 
 from agents.base_agent import BaseAgent
 from config import settings
+from utils import cached, market_data_cache, retry_on_failure, get_logger, safe_get
+
+logger = get_logger(__name__)
 
 
 class MarketDataAgent(BaseAgent):
@@ -46,6 +49,8 @@ class MarketDataAgent(BaseAgent):
         # Default to NSE
         return f"{ticker}.NS"
     
+    @cached(market_data_cache)
+    @retry_on_failure(max_attempts=3)
     async def get_quick_quote(self, ticker: str) -> Dict[str, Any]:
         """
         Get a quick quote for display.
@@ -57,30 +62,46 @@ class MarketDataAgent(BaseAgent):
             Dictionary with current price info
         """
         symbol = self._get_ticker_symbol(ticker)
+        logger.debug(f"Fetching quote for {symbol}")
         stock = yf.Ticker(symbol)
         
         try:
             info = stock.info
             
-            # Handle potential missing data gracefully
-            current_price = info.get('currentPrice') or info.get('regularMarketPrice', 0)
-            previous_close = info.get('previousClose') or info.get('regularMarketPreviousClose', 0)
+            # Validate that we got meaningful data
+            if not info or len(info) < 5:
+                raise ValueError(f"Insufficient data returned for {ticker}")
+            
+            # Handle potential missing data gracefully using safe_get
+            current_price = safe_get(info, 'currentPrice', default=0) or safe_get(info, 'regularMarketPrice', default=0)
+            previous_close = safe_get(info, 'previousClose', default=0) or safe_get(info, 'regularMarketPreviousClose', default=0)
+            
+            if current_price == 0:
+                raise ValueError(f"No price data available for {ticker}")
             
             change = current_price - previous_close if previous_close else 0
             change_pct = (change / previous_close * 100) if previous_close else 0
             
+            logger.info(f"Successfully fetched quote for {ticker}: ₹{current_price}")
+            
             return {
                 "ticker": ticker,
-                "name": info.get('longName', info.get('shortName', ticker)),
+                "name": safe_get(info, 'longName', default=safe_get(info, 'shortName', default=ticker)),
                 "price": round(current_price, 2),
                 "change": round(change, 2),
                 "change_percent": round(change_pct, 2),
-                "volume": info.get('volume', 0),
-                "market_cap": info.get('marketCap')
+                "volume": safe_get(info, 'volume', default=0),
+                "market_cap": safe_get(info, 'marketCap')
             }
+        except ValueError as e:
+            logger.error(f"Validation error for {ticker}: {str(e)}")
+            raise
         except Exception as e:
-            raise Exception(f"Failed to fetch quote: {str(e)}")
+            logger.error(f"Failed to fetch quote for {ticker}: {str(e)}")
+            raise Exception(f"Failed to fetch quote for {ticker}. Please verify the ticker symbol.")
     
+    @cached(market_data_cache)
+    @retry_on_failure(max_attempts=3)
     async def get_historical_data(
         self,
         ticker: str,
@@ -97,13 +118,23 @@ class MarketDataAgent(BaseAgent):
             DataFrame with OHLCV data
         """
         symbol = self._get_ticker_symbol(ticker)
+        logger.debug(f"Fetching {period} historical data for {symbol}")
         stock = yf.Ticker(symbol)
         
         try:
             hist = stock.history(period=period)
+            
+            if hist.empty:
+                raise ValueError(f"No historical data available for {ticker}")
+            
+            logger.info(f"Fetched {len(hist)} days of historical data for {ticker}")
             return hist
+        except ValueError as e:
+            logger.error(f"Validation error for {ticker}: {str(e)}")
+            raise
         except Exception as e:
-            raise Exception(f"Failed to fetch historical data: {str(e)}")
+            logger.error(f"Failed to fetch historical data for {ticker}: {str(e)}")
+            raise Exception(f"Failed to fetch historical data for {ticker}")
     
     async def get_company_info(self, ticker: str) -> Dict[str, Any]:
         """
